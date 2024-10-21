@@ -120,8 +120,9 @@ std::string ClassName(const FileDescriptor* descriptor) {
   return name_resolver.GetClassName(descriptor, true);
 }
 
-std::string FileJavaPackage(const FileDescriptor* file, bool immutable,
-                            Options options) {
+namespace {
+std::string FileClassJavaPackage(const FileDescriptor* file, bool immutable,
+                                 Options options) {
   std::string result;
 
   if (file->options().has_java_package()) {
@@ -137,8 +138,49 @@ std::string FileJavaPackage(const FileDescriptor* file, bool immutable,
   return result;
 }
 
+template <typename Descriptor>
+std::string JavaPackage(const Descriptor* descriptor, Options options,
+                        bool immutable) {
+  const FileDescriptor* file = descriptor->file();
+
+  // Multiple files for mutable messages will be generated only if
+  // java_multiple_files_mutable_package is set and nest_in_file_class is NO.
+  if (!immutable && !IsProto1Api(descriptor->file(), immutable)) {
+    if (!NestedInFileClass(descriptor, immutable) &&
+        file->options().has_java_multiple_files_mutable_package()) {
+      return file->options().java_multiple_files_mutable_package();
+    }
+  }
+  return FileClassJavaPackage(file, immutable, options);
+}
+}  // namespace
+
+std::string FileJavaPackage(const FileDescriptor* file, bool immutable,
+                            Options options) {
+  if (!immutable && !IsProto1Api(file, immutable)) {
+    if (!NestedInFileClass(file, immutable) &&
+        file->options().has_java_multiple_files_mutable_package()) {
+      return file->options().java_multiple_files_mutable_package();
+    }
+  }
+  return FileClassJavaPackage(file, immutable, options);
+}
+
 std::string FileJavaPackage(const FileDescriptor* file, Options options) {
   return FileJavaPackage(file, true /* immutable */, options);
+}
+
+std::string JavaPackageForType(const Descriptor& descriptor, bool immutable,
+                               Options options) {
+  return JavaPackage(&descriptor, options, immutable);
+}
+std::string JavaPackageForType(const EnumDescriptor& descriptor, bool immutable,
+                               Options options) {
+  return JavaPackage(&descriptor, options, immutable);
+}
+std::string JavaPackageForType(const ServiceDescriptor& descriptor,
+                               bool immutable, Options options) {
+  return JavaPackage(&descriptor, options, immutable);
 }
 
 std::string JavaPackageDirectory(const FileDescriptor* file) {

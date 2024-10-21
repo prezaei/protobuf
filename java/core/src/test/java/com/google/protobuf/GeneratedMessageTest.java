@@ -25,6 +25,8 @@ import protobuf_unittest.OuterClassNameTest2OuterClass;
 import protobuf_unittest.OuterClassNameTest3OuterClass;
 import protobuf_unittest.OuterClassNameTestOuterClass;
 import protobuf_unittest.ServiceWithNoOuter;
+import protobuf_unittest.TestNestedInFileClass2024Proto.NestedInFileClassEnum;
+import protobuf_unittest.TestNestedInFileClass2024Proto.NestedInFileClassMessage;
 import protobuf_unittest.UnittestOptimizeFor.TestOptimizedForSize;
 import protobuf_unittest.UnittestOptimizeFor.TestOptionalOptimizedForSize;
 import protobuf_unittest.UnittestOptimizeFor.TestRequiredOptimizedForSize;
@@ -41,6 +43,8 @@ import protobuf_unittest.UnittestProto.TestExtremeDefaultValues;
 import protobuf_unittest.UnittestProto.TestOneof2;
 import protobuf_unittest.UnittestProto.TestPackedTypes;
 import protobuf_unittest.UnittestProto.TestUnpackedTypes;
+import protobuf_unittest.UnnestedEnum;
+import protobuf_unittest.UnnestedMessage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -56,6 +60,7 @@ import org.junit.After;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
+import proto2.unittest.foopkg.MutableTestNestedInFileClass2024Proto;
 
 /**
  * Unit test for generated messages and generated code. See also {@link MessageTest}, which tests
@@ -1972,5 +1977,53 @@ public class GeneratedMessageTest {
     assertThrows(UnsupportedOperationException.class, list::clear);
     builder.clearField(repeatedMsgField);
     assertThat(list).hasSize(1);
+  }
+
+  @Test
+  public void generateMultipleFilesEdition2024() throws Exception {
+    // Ensures that the generated code compiles.
+    UnnestedMessage unnested1 =
+        UnnestedMessage.newBuilder()
+            .setNestedInFileClassEnum(NestedInFileClassEnum.FOO_VALUE)
+            .build();
+    UnnestedMessage unnested2 =
+        UnnestedMessage.parseFrom(unnested1.toByteString(), ExtensionRegistry.getEmptyRegistry());
+    NestedInFileClassMessage nested1 =
+        NestedInFileClassMessage.newBuilder().setUnnestedEnum(UnnestedEnum.BAR_VALUE).build();
+    NestedInFileClassMessage nested2 =
+        NestedInFileClassMessage.parseFrom(
+            nested1.toByteString(), ExtensionRegistry.getEmptyRegistry());
+
+    assertThat(unnested1.getNestedInFileClassEnumValue()).isEqualTo(1);
+    assertThat(unnested2.getNestedInFileClassEnumValue()).isEqualTo(1);
+    assertThat(nested1.getUnnestedEnumValue()).isEqualTo(1);
+    assertThat(nested2.getUnnestedEnumValue()).isEqualTo(1);
+  }
+
+  @Test
+  public void generateMultipleFilesMutableEdition2024() throws Exception {
+    // Ensures that the generated code compiles.
+    proto2.unittest.foopkg.UnnestedEnum unnestedEnum =
+        proto2.unittest.foopkg.UnnestedEnum.BAR_VALUE;
+    proto2.unittest.foopkg.UnnestedMessage mutableUnnested1 =
+        proto2.unittest.foopkg.UnnestedMessage.newMessage()
+            .setNestedInFileClassEnum(
+                MutableTestNestedInFileClass2024Proto.NestedInFileClassEnum.FOO_VALUE);
+    proto2.unittest.foopkg.UnnestedMessage mutableUnnested2 =
+        proto2.unittest.foopkg.UnnestedMessage.newMessage();
+    mutableUnnested2.parseFrom(
+        mutableUnnested1.toByteArray(), ExtensionRegistry.getEmptyRegistry());
+
+    MutableTestNestedInFileClass2024Proto.NestedInFileClassMessage mutableNested1 =
+        MutableTestNestedInFileClass2024Proto.NestedInFileClassMessage.newMessage()
+            .setUnnestedEnum(unnestedEnum);
+    MutableTestNestedInFileClass2024Proto.NestedInFileClassMessage mutableNested2 =
+        MutableTestNestedInFileClass2024Proto.NestedInFileClassMessage.newMessage();
+    mutableNested2.parseFrom(mutableNested1.toByteArray(), ExtensionRegistry.getEmptyRegistry());
+
+    assertThat(mutableUnnested1.getNestedInFileClassEnum().getNumber()).isEqualTo(1);
+    assertThat(mutableUnnested2.getNestedInFileClassEnum().getNumber()).isEqualTo(1);
+    assertThat(mutableNested1.getUnnestedEnum().getNumber()).isEqualTo(1);
+    assertThat(mutableNested2.getUnnestedEnum().getNumber()).isEqualTo(1);
   }
 }
