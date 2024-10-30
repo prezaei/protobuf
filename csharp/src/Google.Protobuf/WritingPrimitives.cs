@@ -28,219 +28,208 @@ namespace Google.Protobuf
     internal static class WritingPrimitives
     {
 #if NET5_0_OR_GREATER
-      internal static Encoding Utf8Encoding => Encoding.UTF8;  // allows JIT to devirtualize
+      internal static Encoding Utf8Encoding => new UTF8Encoding(false, true);  // allows JIT to devirtualize
 #else
-      internal static readonly Encoding Utf8Encoding =
-          Encoding.UTF8;  // "Local" copy of Encoding.UTF8, for efficiency. (Yes, it makes a
-                          // difference.)
+      internal static readonly Encoding Utf8Encoding = new UTF8Encoding(
+          false,
+          true);  // Use Utf8Encoding configured to throw ArgumentExceptions on invaid
+                  // UTF8. See
+                  // https://stackoverflow.com/questions/62762770/forcing-encoding-utf8-getstring-to-throw-an-argumentexception/62763077#62763077.
 #endif
 
-        #region Writing of values (not including tags)
+#region Writing of values(not including tags)
 
-        /// <summary>
-        /// Writes a double field value, without a tag, to the stream.
-        /// </summary>
-        public static void WriteDouble(ref Span<byte> buffer, ref WriterInternalState state, double value)
-        {
-            WriteRawLittleEndian64(ref buffer, ref state, (ulong)BitConverter.DoubleToInt64Bits(value));
+      /// <summary>
+      /// Writes a double field value, without a tag, to the stream.
+      /// </summary>
+      public static void WriteDouble(ref Span<byte> buffer, ref WriterInternalState state,
+                                     double value) {
+        WriteRawLittleEndian64(ref buffer, ref state, (ulong)BitConverter.DoubleToInt64Bits(value));
+      }
+
+      /// <summary>
+      /// Writes a float field value, without a tag, to the stream.
+      /// </summary>
+      public static unsafe void WriteFloat(ref Span<byte> buffer, ref WriterInternalState state,
+                                           float value) {
+        const int length = sizeof(float);
+        if (buffer.Length - state.position >= length) {
+          // if there's enough space in the buffer, write the float directly into the buffer
+          var floatSpan = buffer.Slice(state.position, length);
+          Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(floatSpan), value);
+
+          if (!BitConverter.IsLittleEndian) {
+            floatSpan.Reverse();
+          }
+          state.position += length;
+        } else {
+          WriteFloatSlowPath(ref buffer, ref state, value);
+        }
+      }
+
+      [MethodImpl(MethodImplOptions.NoInlining)]
+      private static unsafe void WriteFloatSlowPath(ref Span<byte> buffer,
+                                                    ref WriterInternalState state, float value) {
+        const int length = sizeof(float);
+
+        // TODO: deduplicate the code. Populating the span is the same as for the
+        // fastpath.
+        Span<byte> floatSpan = stackalloc byte[length];
+        Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(floatSpan), value);
+        if (!BitConverter.IsLittleEndian) {
+          floatSpan.Reverse();
         }
 
-        /// <summary>
-        /// Writes a float field value, without a tag, to the stream.
-        /// </summary>
-        public static unsafe void WriteFloat(ref Span<byte> buffer, ref WriterInternalState state, float value)
-        {
-            const int length = sizeof(float);
-            if (buffer.Length - state.position >= length)
-            {
-                // if there's enough space in the buffer, write the float directly into the buffer
-                var floatSpan = buffer.Slice(state.position, length);
-                Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(floatSpan), value);
+        WriteRawByte(ref buffer, ref state, floatSpan[0]);
+        WriteRawByte(ref buffer, ref state, floatSpan[1]);
+        WriteRawByte(ref buffer, ref state, floatSpan[2]);
+        WriteRawByte(ref buffer, ref state, floatSpan[3]);
+      }
 
-                if (!BitConverter.IsLittleEndian)
-                {
-                    floatSpan.Reverse();
-                }
-                state.position += length;
-            }
-            else
-            {
-                WriteFloatSlowPath(ref buffer, ref state, value);
-            }
+      /// <summary>
+      /// Writes a uint64 field value, without a tag, to the stream.
+      /// </summary>
+      public static void WriteUInt64(ref Span<byte> buffer, ref WriterInternalState state,
+                                     ulong value) {
+        WriteRawVarint64(ref buffer, ref state, value);
+      }
+
+      /// <summary>
+      /// Writes an int64 field value, without a tag, to the stream.
+      /// </summary>
+      public static void WriteInt64(ref Span<byte> buffer, ref WriterInternalState state,
+                                    long value) {
+        WriteRawVarint64(ref buffer, ref state, (ulong)value);
+      }
+
+      /// <summary>
+      /// Writes an int32 field value, without a tag, to the stream.
+      /// </summary>
+      public static void WriteInt32(ref Span<byte> buffer, ref WriterInternalState state,
+                                    int value) {
+        if (value >= 0) {
+          WriteRawVarint32(ref buffer, ref state, (uint)value);
+        } else {
+          // Must sign-extend.
+          WriteRawVarint64(ref buffer, ref state, (ulong)value);
+        }
+      }
+
+      /// <summary>
+      /// Writes a fixed64 field value, without a tag, to the stream.
+      /// </summary>
+      public static void WriteFixed64(ref Span<byte> buffer, ref WriterInternalState state,
+                                      ulong value) {
+        WriteRawLittleEndian64(ref buffer, ref state, value);
+      }
+
+      /// <summary>
+      /// Writes a fixed32 field value, without a tag, to the stream.
+      /// </summary>
+      public static void WriteFixed32(ref Span<byte> buffer, ref WriterInternalState state,
+                                      uint value) {
+        WriteRawLittleEndian32(ref buffer, ref state, value);
+      }
+
+      /// <summary>
+      /// Writes a bool field value, without a tag, to the stream.
+      /// </summary>
+      public static void WriteBool(ref Span<byte> buffer, ref WriterInternalState state,
+                                   bool value) {
+        WriteRawByte(ref buffer, ref state, value ? (byte)1 : (byte)0);
+      }
+
+      /// <summary>
+      /// Writes a string field value, without a tag, to the stream.
+      /// The data is length-prefixed.
+      /// </summary>
+      public static void WriteString(ref Span<byte> buffer, ref WriterInternalState state,
+                                     string value) {
+        const int MaxBytesPerChar = 3;
+        const int MaxSmallStringLength = 128 / MaxBytesPerChar;
+
+        // The string is small enough that the length will always be a 1 byte varint.
+        // Also there is enough space to write length + bytes to buffer.
+        // Write string directly to the buffer, and then write length.
+        // This saves calling GetByteCount on the string. We get the string length from GetBytes.
+        if (value.Length <= MaxSmallStringLength &&
+            buffer.Length - state.position - 1 >= value.Length * MaxBytesPerChar) {
+          int indexOfLengthDelimiter = state.position++;
+          buffer[indexOfLengthDelimiter] = (byte)WriteStringToBuffer(buffer, ref state, value);
+          return;
         }
 
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        private static unsafe void WriteFloatSlowPath(ref Span<byte> buffer, ref WriterInternalState state, float value)
-        {
-            const int length = sizeof(float);
+        int length = Utf8Encoding.GetByteCount(value);
+        WriteLength(ref buffer, ref state, length);
 
-            // TODO: deduplicate the code. Populating the span is the same as for the fastpath.
-            Span<byte> floatSpan = stackalloc byte[length];
-            Unsafe.WriteUnaligned(ref MemoryMarshal.GetReference(floatSpan), value);
-            if (!BitConverter.IsLittleEndian)
-            {
-                floatSpan.Reverse();
-            }
+        // Optimise the case where we have enough space to write
+        // the string directly to the buffer, which should be common.
+        if (buffer.Length - state.position >= length) {
+          if (length == value.Length)  // Must be all ASCII...
+          {
+            WriteAsciiStringToBuffer(buffer, ref state, value, length);
+          } else {
+            WriteStringToBuffer(buffer, ref state, value);
+          }
+        } else {
+          // Opportunity for future optimization:
+          // Large strings that don't fit into the current buffer segment
+          // can probably be optimized by using Utf8Encoding.GetEncoder()
+          // but more benchmarks would need to be added as evidence.
+          byte[] bytes = Utf8Encoding.GetBytes(value);
+          WriteRawBytes(ref buffer, ref state, bytes);
+        }
+      }
 
-            WriteRawByte(ref buffer, ref state, floatSpan[0]);
-            WriteRawByte(ref buffer, ref state, floatSpan[1]);
-            WriteRawByte(ref buffer, ref state, floatSpan[2]);
-            WriteRawByte(ref buffer, ref state, floatSpan[3]);
+      // Calling this method with non-ASCII content will break.
+      // Content must be verified to be all ASCII before using this method.
+      private static void WriteAsciiStringToBuffer(Span<byte> buffer, ref WriterInternalState state,
+                                                   string value, int length) {
+        ref char sourceChars = ref MemoryMarshal.GetReference(value.AsSpan());
+        ref byte destinationBytes = ref MemoryMarshal.GetReference(buffer.Slice(state.position));
+
+        int currentIndex = 0;
+        // If 64bit, process 4 chars at a time.
+        // The logic inside this check will be elided by JIT in 32bit programs.
+        if (IntPtr.Size == 8) {
+          // Need at least 4 chars available to use this optimization.
+          if (length >= 4) {
+            ref byte sourceBytes = ref Unsafe.As<char, byte>(ref sourceChars);
+
+            // Process 4 chars at a time until there are less than 4 remaining.
+            // We already know all characters are ASCII so there is no need to validate the source.
+            int lastIndexWhereCanReadFourChars = value.Length - 4;
+            do {
+              NarrowFourUtf16CharsToAsciiAndWriteToBuffer(
+                  ref Unsafe.AddByteOffset(ref destinationBytes, (IntPtr)currentIndex),
+                  Unsafe.ReadUnaligned<ulong>(
+                      ref Unsafe.AddByteOffset(ref sourceBytes, (IntPtr)(currentIndex * 2))));
+
+            } while ((currentIndex += 4) <= lastIndexWhereCanReadFourChars);
+          }
         }
 
-        /// <summary>
-        /// Writes a uint64 field value, without a tag, to the stream.
-        /// </summary>
-        public static void WriteUInt64(ref Span<byte> buffer, ref WriterInternalState state, ulong value)
-        {
-            WriteRawVarint64(ref buffer, ref state, value);
+        // Process any remaining, 1 char at a time.
+        // Avoid bounds checking with ref + Unsafe
+        for (; currentIndex < length; currentIndex++) {
+          Unsafe.AddByteOffset(ref destinationBytes, (IntPtr)currentIndex) =
+              (byte)Unsafe.AddByteOffset(ref sourceChars, (IntPtr)(currentIndex * 2));
         }
 
-        /// <summary>
-        /// Writes an int64 field value, without a tag, to the stream.
-        /// </summary>
-        public static void WriteInt64(ref Span<byte> buffer, ref WriterInternalState state, long value)
-        {
-            WriteRawVarint64(ref buffer, ref state, (ulong)value);
-        }
+        state.position += length;
+      }
 
-        /// <summary>
-        /// Writes an int32 field value, without a tag, to the stream.
-        /// </summary>
-        public static void WriteInt32(ref Span<byte> buffer, ref WriterInternalState state, int value)
-        {
-            if (value >= 0)
-            {
-                WriteRawVarint32(ref buffer, ref state, (uint)value);
-            }
-            else
-            {
-                // Must sign-extend.
-                WriteRawVarint64(ref buffer, ref state, (ulong)value);
-            }
-        }
-
-        /// <summary>
-        /// Writes a fixed64 field value, without a tag, to the stream.
-        /// </summary>
-        public static void WriteFixed64(ref Span<byte> buffer, ref WriterInternalState state, ulong value)
-        {
-            WriteRawLittleEndian64(ref buffer, ref state, value);
-        }
-
-        /// <summary>
-        /// Writes a fixed32 field value, without a tag, to the stream.
-        /// </summary>
-        public static void WriteFixed32(ref Span<byte> buffer, ref WriterInternalState state, uint value)
-        {
-            WriteRawLittleEndian32(ref buffer, ref state, value);
-        }
-
-        /// <summary>
-        /// Writes a bool field value, without a tag, to the stream.
-        /// </summary>
-        public static void WriteBool(ref Span<byte> buffer, ref WriterInternalState state, bool value)
-        {
-            WriteRawByte(ref buffer, ref state, value ? (byte)1 : (byte)0);
-        }
-
-        /// <summary>
-        /// Writes a string field value, without a tag, to the stream.
-        /// The data is length-prefixed.
-        /// </summary>
-        public static void WriteString(ref Span<byte> buffer, ref WriterInternalState state, string value)
-        {
-            const int MaxBytesPerChar = 3;
-            const int MaxSmallStringLength = 128 / MaxBytesPerChar;
-
-            // The string is small enough that the length will always be a 1 byte varint.
-            // Also there is enough space to write length + bytes to buffer.
-            // Write string directly to the buffer, and then write length.
-            // This saves calling GetByteCount on the string. We get the string length from GetBytes.
-            if (value.Length <= MaxSmallStringLength && buffer.Length - state.position - 1 >= value.Length * MaxBytesPerChar)
-            {
-                int indexOfLengthDelimiter = state.position++;
-                buffer[indexOfLengthDelimiter] = (byte)WriteStringToBuffer(buffer, ref state, value);
-                return;
-            }
-
-            int length = Utf8Encoding.GetByteCount(value);
-            WriteLength(ref buffer, ref state, length);
-
-            // Optimise the case where we have enough space to write
-            // the string directly to the buffer, which should be common.
-            if (buffer.Length - state.position >= length)
-            {
-                if (length == value.Length) // Must be all ASCII...
-                {
-                    WriteAsciiStringToBuffer(buffer, ref state, value, length);
-                }
-                else
-                {
-                    WriteStringToBuffer(buffer, ref state, value);
-                }
-            }
-            else
-            {
-                // Opportunity for future optimization:
-                // Large strings that don't fit into the current buffer segment
-                // can probably be optimized by using Utf8Encoding.GetEncoder()
-                // but more benchmarks would need to be added as evidence.
-                byte[] bytes = Utf8Encoding.GetBytes(value);
-                WriteRawBytes(ref buffer, ref state, bytes);
-            }
-        }
-
-        // Calling this method with non-ASCII content will break.
-        // Content must be verified to be all ASCII before using this method.
-        private static void WriteAsciiStringToBuffer(Span<byte> buffer, ref WriterInternalState state, string value, int length)
-        {
-            ref char sourceChars = ref MemoryMarshal.GetReference(value.AsSpan());
-            ref byte destinationBytes = ref MemoryMarshal.GetReference(buffer.Slice(state.position));
-
-            int currentIndex = 0;
-            // If 64bit, process 4 chars at a time.
-            // The logic inside this check will be elided by JIT in 32bit programs.
-            if (IntPtr.Size == 8)
-            {
-                // Need at least 4 chars available to use this optimization. 
-                if (length >= 4)
-                {
-                    ref byte sourceBytes = ref Unsafe.As<char, byte>(ref sourceChars);
-
-                    // Process 4 chars at a time until there are less than 4 remaining.
-                    // We already know all characters are ASCII so there is no need to validate the source.
-                    int lastIndexWhereCanReadFourChars = value.Length - 4;
-                    do
-                    {
-                        NarrowFourUtf16CharsToAsciiAndWriteToBuffer(
-                            ref Unsafe.AddByteOffset(ref destinationBytes, (IntPtr)currentIndex),
-                            Unsafe.ReadUnaligned<ulong>(ref Unsafe.AddByteOffset(ref sourceBytes, (IntPtr)(currentIndex * 2))));
-
-                    } while ((currentIndex += 4) <= lastIndexWhereCanReadFourChars);
-                }
-            }
-
-            // Process any remaining, 1 char at a time.
-            // Avoid bounds checking with ref + Unsafe
-            for (; currentIndex < length; currentIndex++)
-            {
-                Unsafe.AddByteOffset(ref destinationBytes, (IntPtr)currentIndex) = (byte)Unsafe.AddByteOffset(ref sourceChars, (IntPtr)(currentIndex * 2));
-            }
-
-            state.position += length;
-        }
-
-        // Copied with permission from https://github.com/dotnet/runtime/blob/1cdafd27e4afd2c916af5df949c13f8b373c4335/src/libraries/System.Private.CoreLib/src/System/Text/ASCIIUtility.cs#L1119-L1171
-        //
-        /// <summary>
-        /// Given a QWORD which represents a buffer of 4 ASCII chars in machine-endian order,
-        /// narrows each WORD to a BYTE, then writes the 4-byte result to the output buffer
-        /// also in machine-endian order.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void NarrowFourUtf16CharsToAsciiAndWriteToBuffer(ref byte outputBuffer, ulong value)
-        {
+      // Copied with permission from
+      // https://github.com/dotnet/runtime/blob/1cdafd27e4afd2c916af5df949c13f8b373c4335/src/libraries/System.Private.CoreLib/src/System/Text/ASCIIUtility.cs#L1119-L1171
+      //
+      /// <summary>
+      /// Given a QWORD which represents a buffer of 4 ASCII chars in machine-endian order,
+      /// narrows each WORD to a BYTE, then writes the 4-byte result to the output buffer
+      /// also in machine-endian order.
+      /// </summary>
+      [MethodImpl(MethodImplOptions.AggressiveInlining)]
+      private static void NarrowFourUtf16CharsToAsciiAndWriteToBuffer(ref byte outputBuffer,
+                                                                      ulong value) {
 #if GOOGLE_PROTOBUF_SIMD
             if (Sse2.X64.IsSupported)
             {
