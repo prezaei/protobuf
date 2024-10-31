@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "absl/base/attributes.h"
+#include "absl/log/absl_log.h"
 #include "absl/status/statusor.h"
 #include "google/protobuf/hpb/backend/upb/interop.h"
 #include "google/protobuf/hpb/internal/message_lock.h"
@@ -68,9 +69,8 @@ struct UpbExtensionTrait<int64_t> {
 // not return an error if missing but the default msg
 template <typename T>
 struct UpbExtensionTrait<T> {
-  using DefaultType = int;
-  using ReturnType = int;
-  using DefaultFuncType = void (*)();
+  using DefaultType = T*;
+  using ReturnType = Ptr<const T>;
 };
 
 // -------------------------------------------------------------------
@@ -265,7 +265,8 @@ absl::StatusOr<Ptr<const Extension>> GetExtension(
 
 template <typename T, typename Extendee, typename Extension,
           typename = hpb::internal::EnableIfHpbClass<T>>
-decltype(auto) GetExtension(
+absl::StatusOr<typename internal::UpbExtensionTrait<Extension>::ReturnType>
+GetExtension(
     const T* message,
     const hpb::internal::ExtensionIdentifier<Extendee, Extension>& id) {
   if constexpr (std::is_integral_v<Extension>) {
@@ -275,6 +276,8 @@ decltype(auto) GetExtension(
             hpb::interop::upb::GetMessage(message), id.mini_table_ext(),
             default_val);
     return res;
+  } else if constexpr (internal::IsHpbClass<Extendee>) {
+    return GetExtension(Ptr(message), id);
   } else {
     return GetExtension(Ptr(message), id);
   }

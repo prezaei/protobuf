@@ -136,6 +136,8 @@ std::string DefaultValue(const FieldDescriptor* field) {
       return absl::StrCat(field->default_value_int32());
     case FieldDescriptor::CPPTYPE_INT64:
       return absl::StrCat(field->default_value_int64());
+    case FieldDescriptor::CPPTYPE_MESSAGE:
+      return "nullptr";
     default:
       // TODO: b/375460289 - implement rest of scalars + msg
       ABSL_LOG(WARNING) << "Unsupported default value type (in-progress): <"

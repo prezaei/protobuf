@@ -36,9 +36,12 @@ template <typename T, typename U = RemovePtrT<T>,
 using PtrOrRaw = T;
 
 template <typename T>
-using EnableIfHpbClass = std::enable_if_t<
-    std::is_base_of<typename T::Access, T>::value &&
-    std::is_base_of<typename T::Access, typename T::ExtendableType>::value>;
+constexpr bool IsHpbClass =
+    std::is_base_of_v<typename T::Access, T> &&
+    std::is_base_of_v<typename T::Access, typename T::ExtendableType>;
+
+template <typename T>
+using EnableIfHpbClass = std::enable_if_t<IsHpbClass<T>>;
 
 template <typename T>
 using EnableIfMutableProto = std::enable_if_t<!std::is_const<T>::value>;
