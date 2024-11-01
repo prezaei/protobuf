@@ -17,13 +17,19 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <initializer_list>
 #include <iterator>
 #include <limits>  // To support Visual Studio 2008
+#include <new>     // IWYU pragma: keep for ::operator new.
 #include <string>
 #include <type_traits>
 #include <utility>
+
+#include "absl/memory/memory.h"
+#include "google/protobuf/message_lite.h"
+#include "google/protobuf/string_member_robber.h"
 
 #if !defined(GOOGLE_PROTOBUF_NO_RDTSC) && defined(__APPLE__)
 #include <time.h>
