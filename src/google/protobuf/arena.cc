@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "absl/base/attributes.h"
+#include "absl/base/dynamic_annotations.h"
 #include "absl/base/prefetch.h"
 #include "absl/container/internal/layout.h"
 #include "absl/log/absl_check.h"
@@ -585,6 +586,7 @@ ArenaBlock* ThreadSafeArena::FirstBlock(void* buf, size_t size) {
   }
   // Record user-owned block.
   alloc_policy_.set_is_user_owned_initial_block(true);
+  ABSL_ANNOTATE_MEMORY_IS_UNINITIALIZED(buf, size);
   return new (buf) ArenaBlock{nullptr, size};
 }
 
@@ -601,6 +603,7 @@ ArenaBlock* ThreadSafeArena::FirstBlock(void* buf, size_t size,
     mem = {buf, size};
     // Record user-owned block.
     alloc_policy_.set_is_user_owned_initial_block(true);
+    ABSL_ANNOTATE_MEMORY_IS_UNINITIALIZED(buf, size);
   }
 
   return new (mem.p) ArenaBlock{nullptr, mem.n};
@@ -795,6 +798,7 @@ uint64_t ThreadSafeArena::Reset() {
     size_t offset = alloc_policy_.get() == nullptr
                         ? kBlockHeaderSize
                         : kBlockHeaderSize + kAllocPolicySize;
+    ABSL_ANNOTATE_MEMORY_IS_UNINITIALIZED(mem.p, mem.n);
     first_arena_.Init(new (mem.p) ArenaBlock{nullptr, mem.n}, offset);
   } else {
     first_arena_.Init(SentryArenaBlock(), 0);
